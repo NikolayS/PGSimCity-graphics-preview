@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./real-postgres-runtime-CV9qpFhJ.js","./_pgsimcity-machine-preload-helper-BGjjDIYT.js","./corrections-j3ZTgx1S.js"])))=>i.map(i=>d[i]);
+import{_ as t}from"./_pgsimcity-machine-preload-helper-BGjjDIYT.js";import{p as e}from"./explain-json-XsC2o6ft.js";async function n(){return(await t(()=>import("./real-postgres-runtime-CV9qpFhJ.js").then(r=>r.r),__vite__mapDeps([0,1,2]))).createPgliteSource(e)}export{n as loadRealPostgres};
