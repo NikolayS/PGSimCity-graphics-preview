@@ -1,0 +1,77 @@
+name: Verify graphics preview
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Immutable PGSimCity source commit to verify
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: graphics-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: NikolayS/PGSimCity
+          ref: ${{ inputs.source_ref }}
+          path: app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Identify source build
+        working-directory: app
+        run: echo "PGSIMCITY_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+      - name: Non-browser tests
+        working-directory: app
+        run: npm test -- --exclude '**/*.browser.test.*'
+      - name: Typecheck and build
+        working-directory: app
+        run: |
+          npm run typecheck
+          npm run build
+          cp LICENSE NOTICE dist/
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd
+        with:
+          chrome-version: stable
+      - name: Capture matched baseline and polished views
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          CDP_REDUCED_MOTION: '1'
+        working-directory: app
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ../evidence
+          npm run preview -- --host 127.0.0.1 > ../evidence/server.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          CDP_PORT=9501 node tools/shoot.mjs 'http://127.0.0.1:4173/' ../evidence/baseline-day.png 45000 1280 760 "window.PGSIMCITY.sim.reset(); window.PGSIMCITY.sim.setKnob('paused',true); window.PGSIMCITY.setThemeMode('day',{persist:false}); window.PGSIMCITY.gfx.setQuality('high')" > ../evidence/baseline-day.log 2>&1
+          CDP_PORT=9502 node tools/shoot.mjs 'http://127.0.0.1:4173/?visual=polish' ../evidence/polished-day.png 45000 1280 760 "window.PGSIMCITY.sim.reset(); window.PGSIMCITY.sim.setKnob('paused',true); window.PGSIMCITY.setThemeMode('day',{persist:false}); window.PGSIMCITY.gfx.setQuality('high')" > ../evidence/polished-day.log 2>&1
+          CDP_PORT=9503 node tools/shoot.mjs 'http://127.0.0.1:4173/' ../evidence/baseline-night.png 45000 1280 760 "window.PGSIMCITY.sim.reset(); window.PGSIMCITY.sim.setKnob('paused',true); window.PGSIMCITY.setThemeMode('night',{persist:false}); window.PGSIMCITY.gfx.setQuality('high')" > ../evidence/baseline-night.log 2>&1
+          CDP_PORT=9504 node tools/shoot.mjs 'http://127.0.0.1:4173/?visual=polish' ../evidence/polished-night.png 45000 1280 760 "window.PGSIMCITY.sim.reset(); window.PGSIMCITY.sim.setKnob('paused',true); window.PGSIMCITY.setThemeMode('night',{persist:false}); window.PGSIMCITY.gfx.setQuality('high')" > ../evidence/polished-night.log 2>&1
+          if rg '\[EXCEPTION\]|\[PRE-FAIL\]' ../evidence/*.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-evidence
+          path: evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-build
+          path: app/dist
